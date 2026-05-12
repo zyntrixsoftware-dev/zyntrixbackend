@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Import Data — ZyntrixCRM</title>
+  <!-- SheetJS loaded FIRST so XLSX global is ready before any script -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="../assets/js/api.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+    :root {
+      --bg:#080e18; --bg2:#0d1624; --bg3:#111e30; --bg4:#162436;
+      --accent:#00e5b0; --accent2:#00c99a;
+      --rose:#ff4d6d; --blue:#3d8ef0;
+      --text:#e8f0fe; --text2:#8ba3bf; --text3:#4e6680;
+      --border:rgba(255,255,255,0.06); --border2:rgba(255,255,255,0.11);
+      --font:'Instrument Sans',sans-serif; --display:'Syne',sans-serif;
+    }
+    html,body { min-height:100vh; background:var(--bg); color:var(--text); font-family:var(--font); font-size:14px; }
+    .import-page { max-width:860px; margin:40px auto; padding:0 20px 80px; }
+    h1 { font-size:1.6rem; font-weight:700; margin-bottom:4px; font-family:var(--display); }
+    .subtitle { color:var(--text3); font-size:0.9rem; margin-bottom:32px; }
+
+    /* stepper */
+    .stepper { display:flex; margin-bottom:36px; }
+    .step { flex:1; display:flex; flex-direction:column; align-items:center; position:relative; }
+    .step:not(:last-child)::after { content:''; position:absolute; top:16px; left:50%; width:100%; height:2px; background:var(--border2); z-index:0; }
+    .step.done::after { background:var(--accent); }
+    .step-dot { width:32px; height:32px; border-radius:50%; background:var(--bg2); border:2px solid var(--border2); display:flex; align-items:center; justify-content:center; font-size:.8rem; font-weight:700; position:relative; z-index:1; color:var(--text3); }
+    .step.active .step-dot { border-color:var(--accent); color:var(--accent); }
+    .step.done .step-dot { background:var(--accent); border-color:var(--accent); color:var(--bg); }
+    .step-label { font-size:.75rem; margin-top:6px; color:var(--text3); text-align:center; }
+    .step.active .step-label { color:var(--accent); font-weight:600; }
+
+    /* card */
+    .card { background:var(--bg2); border:1px solid var(--border2); border-radius:14px; padding:28px 32px; }
+    .screen { display:none; }
+    .screen.active { display:block; }
+
+    /* drop zone */
+    .drop-zone { border:2px dashed var(--border2); border-radius:10px; padding:56px 24px; text-align:center; cursor:pointer; transition:border-color .2s,background .2s; }
+    .drop-zone:hover,.drop-zone.dragover { border-color:var(--accent); background:rgba(0,229,176,.04); }
+    .drop-zone svg { width:48px; height:48px; stroke:var(--text3); margin-bottom:12px; }
+    .drop-zone p { color:var(--text2); }
+    .drop-zone small { color:var(--text3); font-size:.82rem; }
+    #file-input { display:none; }
+    .file-chosen { margin-top:14px; padding:10px 16px; background:var(--bg3); border-radius:8px; font-size:.9rem; display:none; color:var(--text2); }
+    .file-chosen span { color:var(--accent); font-weight:600; }
+
+    /* selects */
+    .field-row { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:20px; }
+    label { display:block; font-size:.82rem; color:var(--text3); margin-bottom:6px; font-weight:500; }
+    select,input[type=text] { width:100%; padding:9px 12px; background:var(--bg3); border:1px solid var(--border2); border-radius:8px; color:var(--text); font-size:.9rem; outline:none; font-family:var(--font); }
+    select:focus,input:focus { border-color:var(--accent); }
+    select option { background:var(--bg2); }
+
+    /* mapping table */
+    .mapping-table { width:100%; border-collapse:collapse; margin-top:16px; }
+    .mapping-table th { font-size:.78rem; text-align:left; color:var(--text3); padding:6px 10px; border-bottom:1px solid var(--border2); }
+    .mapping-table td { padding:7px 10px; border-bottom:1px solid var(--border); font-size:.88rem; vertical-align:middle; }
+    .mapping-table td:first-child { color:var(--text2); font-family:monospace; font-size:.82rem; }
+    .mapping-table select { padding:5px 8px; font-size:.85rem; }
+    .badge-sample { background:var(--bg3); border-radius:4px; padding:2px 7px; font-size:.78rem; color:var(--text3); font-family:monospace; }
+
+    /* confirm */
+    .confirm-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin:20px 0; }
+    .confirm-stat { background:var(--bg3); border-radius:8px; padding:16px; text-align:center; }
+    .confirm-stat .num { font-size:1.6rem; font-weight:700; color:var(--accent); font-family:var(--display); }
+    .confirm-stat .lbl { font-size:.8rem; color:var(--text3); margin-top:4px; }
+    .mapped-preview { max-height:200px; overflow-y:auto; margin-top:16px; }
+    .mapped-preview table { width:100%; border-collapse:collapse; font-size:.85rem; }
+    .mapped-preview th { padding:5px 10px; background:var(--bg3); color:var(--text3); font-size:.78rem; text-align:left; }
+    .mapped-preview td { padding:5px 10px; border-bottom:1px solid var(--border); color:var(--text2); }
+
+    /* buttons */
+    .btn-row { display:flex; gap:12px; margin-top:24px; justify-content:flex-end; }
+    .btn { padding:10px 22px; border-radius:8px; font-size:.9rem; font-weight:600; cursor:pointer; border:none; transition:opacity .15s; font-family:var(--font); }
+    .btn:hover { opacity:.85; }
+    .btn-primary { background:var(--accent); color:var(--bg); }
+    .btn-ghost { background:var(--bg3); color:var(--text2); border:1px solid var(--border2); }
+    .btn-success { background:#16a34a; color:#fff; }
+    .btn:disabled { opacity:.4; cursor:not-allowed; }
+
+    /* progress */
+    .upload-progress { display:none; margin-top:16px; }
+    .upload-progress.show { display:block; }
+    .prog-bar { height:4px; background:var(--bg4); border-radius:2px; overflow:hidden; }
+    .prog-fill { height:100%; background:var(--accent); border-radius:2px; animation:progSlide 1.8s ease infinite; }
+    @keyframes progSlide { 0%{transform:translateX(-100%);width:60%} 100%{transform:translateX(200%);width:60%} }
+    .prog-label { font-size:.82rem; color:var(--text3); margin-top:6px; }
+
+    /* error */
+    .err-box { display:none; margin-top:14px; padding:12px 16px; background:rgba(255,77,109,.1); border:1px solid rgba(255,77,109,.3); border-radius:8px; color:var(--rose); font-size:.88rem; line-height:1.5; }
+    .err-box.show { display:block; }
+
+    /* toast */
+    .toast { position:fixed; bottom:28px; right:28px; padding:13px 20px; border-radius:10px; font-size:.9rem; font-weight:500; z-index:9999; background:var(--bg2); border:1px solid var(--border2); color:var(--text); box-shadow:0 4px 24px rgba(0,0,0,.5); transform:translateY(60px); opacity:0; transition:all .25s; max-width:380px; }
+    .toast.show { transform:translateY(0); opacity:1; }
+    .toast.error { border-color:rgba(255,77,109,.4); }
+    .toast.success { border-color:rgba(0,229,176,.4); }
+
+    /* success */
+    .success-screen { text-align:center; padding:20px 0; }
+    .success-screen .checkmark { font-size:4rem; }
+    .success-screen h2 { margin:12px 0 8px; font-family:var(--display); }
+    .success-screen p { color:var(--text3); }
+    .success-links { display:flex; gap:10px; justify-content:center; margin-top:24px; flex-wrap:wrap; }
+    .success-links a { padding:10px 18px; background:var(--bg3); border:1px solid var(--border2); border-radius:8px; color:var(--text); text-decoration:none; font-size:.88rem; }
+    .success-links a:hover { border-color:var(--accent); color:var(--accent); }
+
+    .spinner { display:inline-block; width:15px; height:15px; border:2px solid rgba(0,0,0,.2); border-top-color:var(--bg); border-radius:50%; animation:spin .6s linear infinite; margin-right:7px; vertical-align:middle; }
+    @keyframes spin { to{transform:rotate(360deg)} }
+  </style>
+</head>
+<body>
+<div class="import-page">
+  <h1>Import Data from Excel</h1>
+  <p class="subtitle">Upload your spreadsheet, map columns, confirm — data is live instantly across all pages.</p>
+
+  <div class="stepper">
+    <div class="step active" id="s1"><div class="step-dot">1</div><div class="step-label">Choose File</div></div>
+    <div class="step"        id="s2"><div class="step-dot">2</div><div class="step-label">Map Columns</div></div>
+    <div class="step"        id="s3"><div class="step-dot">3</div><div class="step-label">Confirm</div></div>
+  </div>
+
+  <div class="card">
+    <!-- A: choose file -->
+    <div class="screen active" id="screenA">
+      <div class="drop-zone" id="dropZone">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 15v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        <p>Drag &amp; drop your Excel file here</p>
+        <small>or click to browse — .xlsx / .xls · max 10 MB</small>
+        <input type="file" id="file-input" accept=".xlsx,.xls" />
+      </div>
+      <div class="file-chosen" id="fileChosen">Selected: <span id="fileName"></span></div>
+      <div class="field-row">
+        <div>
+          <label>System</label>
+          <select id="selSystem">
+            <option value="sales">Sales</option>
+            <option value="hrms">HRMS</option>
+            <option value="employee">Employee</option>
+          </select>
+        </div>
+        <div>
+          <label>Data Type</label>
+          <select id="selType">
+            <option value="leads">Leads</option>
+            <option value="deals">Deals</option>
+            <option value="activities">Activities</option>
+            <option value="meetings">Meetings</option>
+          </select>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="btnNextA" disabled>Next: Map Columns →</button>
+      </div>
+    </div>
+
+    <!-- B: map columns -->
+    <div class="screen" id="screenB">
+      <h3 style="margin:0 0 4px;font-family:var(--display);">Map Your Columns</h3>
+      <p style="color:var(--text3);font-size:.88rem;margin-bottom:0">Select what each Excel column means. Skip anything irrelevant.</p>
+      <div style="overflow-x:auto">
+        <table class="mapping-table">
+          <thead><tr><th>Excel Column</th><th>Sample Value</th><th>Maps To</th><th>Label</th></tr></thead>
+          <tbody id="mappingBody"></tbody>
+        </table>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-ghost" id="btnBackB">← Back</button>
+        <button class="btn btn-primary" id="btnNextB">Next: Confirm →</button>
+      </div>
+    </div>
+
+    <!-- C: confirm -->
+    <div class="screen" id="screenC">
+      <h3 style="margin:0 0 4px;font-family:var(--display);">Confirm Import</h3>
+      <p style="color:var(--text3);font-size:.88rem;margin-bottom:0">Review before uploading.</p>
+      <div class="confirm-grid">
+        <div class="confirm-stat"><div class="num" id="cntRows">0</div><div class="lbl">Rows</div></div>
+        <div class="confirm-stat"><div class="num" id="cntCols">0</div><div class="lbl">Mapped Columns</div></div>
+        <div class="confirm-stat"><div class="num" id="cntSystem" style="font-size:1rem;line-height:1.3">—</div><div class="lbl">System / Type</div></div>
+      </div>
+      <div class="mapped-preview">
+        <table><thead><tr><th>Excel Header</th><th>System Key</th><th>Label</th></tr></thead><tbody id="confirmBody"></tbody></table>
+      </div>
+      <div style="margin-top:14px;padding:11px 14px;background:var(--bg3);border-radius:8px;font-size:.84rem;color:var(--text3);">
+        ⚠️ This will <strong style="color:var(--text2)">replace</strong> all previously imported data for this system / type.
+      </div>
+
+      <div class="upload-progress" id="uploadProgress">
+        <div class="prog-bar"><div class="prog-fill"></div></div>
+        <div class="prog-label" id="uploadStatus">Uploading…</div>
+      </div>
+      <div class="err-box" id="errBox"></div>
+
+      <div class="btn-row">
+        <button class="btn btn-ghost" id="btnBackC">← Back</button>
+        <button class="btn btn-success" id="btnConfirm">🚀 Confirm Import</button>
+      </div>
+    </div>
+
+    <!-- D: success -->
+    <div class="screen" id="screenD">
+      <div class="success-screen">
+        <div class="checkmark">✅</div>
+        <h2>Import Complete!</h2>
+        <p id="successMsg">Your data has been imported successfully.</p>
+        <div class="success-links">
+          <a href="sales_system/pipeline.html"  id="lnk-pipeline">Pipeline Board</a>
+          <a href="sales_system/deals.html"     id="lnk-deals">View Deals</a>
+          <a href="sales_system/leads.html"     id="lnk-leads">View Leads</a>
+          <a href="sales_system/dashboard.html" id="lnk-dash">Dashboard</a>
+          <a href="HRMS/talent_acquisition/candidates/candidates.html" id="lnk-cand" style="display:none">View Candidates</a>
+          <a href="javascript:location.reload()">↑ Import More</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ─── field options ─────────────────────────────── */
+const FIELD_OPTIONS = {
+  sales: [
+    {key:'name',       label:'Name / Company',  type:'string'},
+    {key:'company',    label:'Company',         type:'string'},
+    {key:'email',      label:'Email',           type:'email' },
+    {key:'phone',      label:'Phone',           type:'phone' },
+    {key:'stage',      label:'Stage',           type:'string'},
+    {key:'status',     label:'Status',          type:'string'},
+    {key:'value',      label:'Deal Value',      type:'number'},
+    {key:'owner',      label:'Owner / Rep',     type:'string'},
+    {key:'source',     label:'Source',          type:'string'},
+    {key:'industry',   label:'Industry',        type:'string'},
+    {key:'close',      label:'Close Date',      type:'date'  },
+    {key:'prob',       label:'Probability %',   type:'number'},
+    {key:'priority',   label:'Priority',        type:'string'},
+    {key:'product',    label:'Product',         type:'string'},
+    {key:'notes',      label:'Notes',           type:'string'},
+    {key:'country',    label:'Country',         type:'string'},
+    {key:'created',    label:'Created Date',    type:'date'  },
+  ],
+  hrms: [
+    {key:'name',          label:'Full Name',       type:'string'},
+    {key:'email',         label:'Email',           type:'email' },
+    {key:'phone',         label:'Phone',           type:'phone' },
+    {key:'role',          label:'Position / Role', type:'string'},
+    {key:'department',    label:'Department',      type:'string'},
+    {key:'status',        label:'Status',          type:'string'},
+    {key:'stage',         label:'Stage',           type:'string'},
+    {key:'score',         label:'Score',           type:'number'},
+    {key:'date',          label:'Date',            type:'date'  },
+    {key:'source',        label:'Source',          type:'string'},
+    {key:'location',      label:'Location',        type:'string'},
+    {key:'qualification', label:'Qualification',   type:'string'},
+    {key:'experience',    label:'Experience',      type:'string'},
+    {key:'skills',        label:'Skills',          type:'string'},
+    {key:'notes',         label:'Notes',           type:'string'},
+  ],
+  employee: [
+    {key:'name',       label:'Full Name',    type:'string'},
+    {key:'email',      label:'Email',        type:'email' },
+    {key:'phone',      label:'Phone',        type:'phone' },
+    {key:'emp_id',     label:'Employee ID',  type:'string'},
+    {key:'department', label:'Department',   type:'string'},
+    {key:'position',   label:'Position',     type:'string'},
+    {key:'join_date',  label:'Joining Date', type:'date'  },
+    {key:'salary',     label:'Salary',       type:'number'},
+    {key:'status',     label:'Status',       type:'string'},
+    {key:'location',   label:'Location',     type:'string'},
+  ]
+};
+
+/* ─── state ─────────────────────────────────────── */
+let selectedFile = null, excelRows = [], excelHeaders = [], finalMapping = [];
+
+/* ─── utils ─────────────────────────────────────── */
+const toast = (msg, type='') => {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'toast show ' + type;
+  setTimeout(() => t.className = 'toast', 4000);
+};
+const showErr = msg => { const b = document.getElementById('errBox'); b.innerHTML = '❌ ' + msg; b.classList.add('show'); };
+const hideErr = () => document.getElementById('errBox').classList.remove('show');
+const setStep = n => {
+  ['s1','s2','s3'].forEach((id,i) => {
+    document.getElementById(id).className = 'step'+(i+1<n?' done':i+1===n?' active':'');
+  });
+  ['screenA','screenB','screenC','screenD'].forEach((id,i) => {
+    document.getElementById(id).className = 'screen'+(i+1===n||(n===4&&i===3)?' active':'');
+  });
+};
+
+/* ─── Screen A ──────────────────────────────────── */
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('file-input');
+const btnNextA  = document.getElementById('btnNextA');
+dropZone.onclick = () => fileInput.click();
+dropZone.ondragover = e => { e.preventDefault(); dropZone.classList.add('dragover'); };
+dropZone.ondragleave = () => dropZone.classList.remove('dragover');
+dropZone.ondrop = e => { e.preventDefault(); dropZone.classList.remove('dragover'); if(e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]); };
+fileInput.onchange = () => { if(fileInput.files[0]) setFile(fileInput.files[0]); };
+
+function setFile(f) {
+  if(!f.name.match(/\.(xlsx|xls)$/i)) { toast('Please upload a .xlsx or .xls file','error'); return; }
+  selectedFile = f;
+  document.getElementById('fileName').textContent = f.name + ' (' + (f.size/1024).toFixed(1) + ' KB)';
+  document.getElementById('fileChosen').style.display = 'block';
+  btnNextA.disabled = false;
+}
+
+btnNextA.onclick = async () => {
+  btnNextA.disabled = true;
+  btnNextA.innerHTML = '<span class="spinner"></span>Reading…';
+  try {
+    if(typeof XLSX==='undefined') throw new Error('SheetJS not loaded — check internet connection');
+    const reader = new FileReader();
+    excelRows = await new Promise((res,rej) => {
+      reader.onload = e => {
+        try {
+          const wb = XLSX.read(e.target.result,{type:'binary'});
+          res(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''}));
+        } catch(ex){rej(ex);}
+      };
+      reader.onerror = rej;
+      reader.readAsBinaryString(selectedFile);
+    });
+    excelHeaders = excelRows.length ? Object.keys(excelRows[0]) : [];
+    if(!excelHeaders.length) throw new Error('No columns found in the file');
+    buildMappingTable();
+    setStep(2);
+  } catch(err) {
+    toast('Could not read file: '+err.message,'error');
+  } finally {
+    btnNextA.disabled = false;
+    btnNextA.innerHTML = 'Next: Map Columns →';
+  }
+};
+
+/* ─── Screen B ──────────────────────────────────── */
+function buildMappingTable() {
+  const system  = document.getElementById('selSystem').value;
+  const options = FIELD_OPTIONS[system]||FIELD_OPTIONS.sales;
+  const optHtml = '<option value="_skip">— Skip —</option>' +
+    options.map(o=>`<option value="${o.key}">${o.label}</option>`).join('');
+  const sample = excelRows[0]||{};
+  document.getElementById('mappingBody').innerHTML = excelHeaders.map((h,i) => {
+    const hn = h.toLowerCase().replace(/[\s_\-\.]/g,'');
+    const guess = options.find(o => {
+      const kn = o.key.replace(/_/g,'');
+      const ln = o.label.toLowerCase().replace(/[\s_\-\.\/]/g,'');
+      return kn===hn||ln===hn||hn.includes(kn)||kn.includes(hn);
+    });
+    const sel = guess?guess.key:'_skip';
+    return `<tr>
+      <td>${h}</td>
+      <td><span class="badge-sample">${String(sample[h]).substring(0,28)}</span></td>
+      <td><select class="map-select" data-header="${h}">${optHtml.replace(`value="${sel}"`,`value="${sel}" selected`)}</select></td>
+      <td><input type="text" class="map-label" value="${guess?guess.label:h}"/></td>
+    </tr>`;
+  }).join('');
+}
+
+document.getElementById('btnBackB').onclick = () => setStep(1);
+document.getElementById('btnNextB').onclick = () => {
+  const system = document.getElementById('selSystem').value;
+  const options = FIELD_OPTIONS[system]||FIELD_OPTIONS.sales;
+  const sels = [...document.querySelectorAll('.map-select')];
+  const labs = [...document.querySelectorAll('.map-label')];
+  finalMapping = [];
+  sels.forEach((sel,i) => {
+    if(sel.value==='_skip') return;
+    const opt = options.find(o=>o.key===sel.value);
+    finalMapping.push({excelHeader:sel.dataset.header, systemKey:sel.value, label:labs[i]?.value||sel.value, dataType:opt?opt.type:'string'});
+  });
+  if(!finalMapping.length){toast('Map at least one column','error');return;}
+  buildConfirmScreen(); setStep(3);
+};
+
+/* ─── Screen C ──────────────────────────────────── */
+function buildConfirmScreen() {
+  const system = document.getElementById('selSystem').value;
+  const type   = document.getElementById('selType').value;
+  document.getElementById('cntRows').textContent   = excelRows.length.toLocaleString();
+  document.getElementById('cntCols').textContent   = finalMapping.length;
+  document.getElementById('cntSystem').textContent = system.toUpperCase()+' / '+type;
+  document.getElementById('confirmBody').innerHTML = finalMapping
+    .map(f=>`<tr><td>${f.excelHeader}</td><td><code>${f.systemKey}</code></td><td>${f.label}</td></tr>`).join('');
+  hideErr();
+  document.getElementById('uploadProgress').classList.remove('show');
+}
+
+document.getElementById('btnBackC').onclick = () => setStep(2);
+
+document.getElementById('btnConfirm').onclick = async () => {
+  const btn    = document.getElementById('btnConfirm');
+  const system = document.getElementById('selSystem').value;
+  const type   = document.getElementById('selType').value;
+  const token  = localStorage.getItem('token');
+
+  hideErr();
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Uploading…';
+  document.getElementById('uploadProgress').classList.add('show');
+  document.getElementById('uploadStatus').textContent = 'Sending '+excelRows.length+' rows to server…';
+
+  /* 60-second timeout using AbortController */
+  const ctrl    = new AbortController();
+  const timerId = setTimeout(() => ctrl.abort(), 60000);
+
+  try {
+    const fd = new FormData();
+    fd.append('file',    selectedFile);
+    fd.append('system',  system);
+    fd.append('type',    type);
+    fd.append('mapping', JSON.stringify(finalMapping));
+
+    /* resolve API base — works with api.js already loaded */
+    const API = (typeof API_BASE!=='undefined')
+      ? API_BASE
+      : (window.location.hostname==='localhost'||window.location.hostname==='127.0.0.1'
+          ? 'http://localhost:5000/api'
+          : 'https://zyntrixbackend-production-d32c.up.railway.app/api');
+
+    document.getElementById('uploadStatus').textContent = 'Connecting to '+API.replace('/api','')+'…';
+
+    const res = await fetch(API+'/import/upload', {
+      method:  'POST',
+      headers: token ? {Authorization:'Bearer '+token} : {},
+      body:    fd,
+      signal:  ctrl.signal
+    });
+
+    clearTimeout(timerId);
+    document.getElementById('uploadStatus').textContent = 'Processing response…';
+
+    let data;
+    try { data = await res.json(); }
+    catch(e) { throw new Error('Server returned non-JSON. Status: '+res.status+'. The backend may not have the import route yet — please redeploy.'); }
+
+    if(!res.ok) throw new Error(data.msg||'Server error: '+res.status);
+
+    /* success */
+    document.getElementById('successMsg').textContent =
+      data.count.toLocaleString()+' records imported into '+system.toUpperCase()+' / '+type+'!';
+    ['lnk-pipeline','lnk-deals','lnk-leads','lnk-dash'].forEach(id => {
+      document.getElementById(id).style.display = system==='sales' ? '' : 'none';
+    });
+    document.getElementById('lnk-cand').style.display = system==='hrms' ? '' : 'none';
+    setStep(4);
+
+  } catch(err) {
+    clearTimeout(timerId);
+    let msg = err.message||'Unknown error';
+    if(err.name==='AbortError') {
+      msg = 'Request timed out after 60 s. The Railway server may be cold-starting — wait 30 s then try again.';
+    } else if(msg.includes('fetch')||msg.includes('network')||msg.toLowerCase().includes('failed')) {
+      msg = 'Cannot reach the server. Check your internet connection or wait a moment and retry.';
+    }
+    showErr(msg);
+    toast('Upload failed — see error below','error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '🚀 Confirm Import';
+    document.getElementById('uploadProgress').classList.remove('show');
+  }
+};
+
+/* ─── system → type sync ───────────────────────── */
+document.getElementById('selSystem').addEventListener('change', () => {
+  const m = {
+    sales:    [['leads','Leads'],['deals','Deals'],['activities','Activities'],['meetings','Meetings']],
+    hrms:     [['candidates','Candidates'],['interviews','Interviews'],['onboarding','Onboarding'],['careers','Careers / Job Posts'],['employees','Employees']],
+    employee: [['employees','Employees'],['onboarding','Onboarding']]
+  };
+  document.getElementById('selType').innerHTML =
+    (m[document.getElementById('selSystem').value]||[]).map(([v,l])=>`<option value="${v}">${l}</option>`).join('');
+});
+
+/* ─── URL params pre-fill ──────────────────────── */
+(function(){
+  const p = new URLSearchParams(window.location.search);
+  if(p.get('system')){
+    document.getElementById('selSystem').value = p.get('system');
+    document.getElementById('selSystem').dispatchEvent(new Event('change'));
+  }
+  if(p.get('type')) setTimeout(()=>{ document.getElementById('selType').value=p.get('type'); },50);
+})();
+</script>
+</body>
+</html>
